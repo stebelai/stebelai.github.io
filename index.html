@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>ГОНКА!!!</title>
+    <link rel="manifest" href="manifest.json">
+    <style>
+        /* Сбрасываем отступы и задаём фон страницы */
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            font-family: sans-serif;
+        }
+        /* Заставка */
+        .intro {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100%;
+            background-image: url('road1.png'); /* Убедитесь, что изображение road1.png находится в той же директории */
+            background-size: cover;
+            background-position: center;
+        }
+        .start-button {
+            padding: 20px 40px;
+            font-size: 24px;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.7);
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .start-button:hover {
+            background-color: rgba(0, 0, 0, 0.9);
+        }
+        /* Холст (поле для игры) */
+        #gameCanvas {
+            display: none; /* Скрыт по умолчанию */
+            margin: 0 auto;
+            background: #555; /* На случай, если картинка не загрузится */
+        }
+    </style>
+</head>
+<body>
+
+<div class="intro">
+    <button class="start-button" onclick="startGame()">СТАРТ</button>
+</div>
+
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+
+<script>
+// Регистрация сервисного работника
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js')
+            .then(registration => {
+                console.log('ServiceWorker registration successful with scope: ', registration.scope);
+            })
+            .catch(error => {
+                console.log('ServiceWorker registration failed: ', error);
+            });
+    });
+}
+
+// Функция для начала игры
+function startGame() {
+    document.querySelector('.intro').style.display = 'none'; // Скрываем заставку
+    document.getElementById('gameCanvas').style.display = 'block'; // Показываем холст
+    gameLoop(); // Запускаем игровой цикл
+}
+
+// 1) Настраиваем холст
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// 2) Загрузка фонового изображения
+const backgroundImg = new Image();
+backgroundImg.src = 'road.png'; // картинка фона (лежит рядом с index.html)
+
+// 3) Машина игрока
+let player = {
+    x: canvas.width / 2 - 25, // Начало по центру
+    y: canvas.height - 100,   // Внизу экрана
+    width: 50,
+    height: 70,
+    speed: 5,
+    color: 'red'
+};
+
+// 4) Полицейская машина (преследователь)
+let police = {
+    x: canvas.width / 2 - 25,
+    y: 0,
+    width: 50,
+    height: 70,
+    speed: 2,
+    color: 'blue'
+};
+
+// 5) Массив соперников (машины, едущие сверху вниз)
+let opponents = [];
+// Функция для создания нескольких соперников
+function createOpponents(num) {
+    for (let i = 0; i < num; i++) {
+        let x = Math.random() * (canvas.width - 50);
+        let y = -Math.random() * 600; // случайная позиция "выше" экрана
+        opponents.push({
+            x: x,
+            y: y,
+            width: 50,
+            height: 70,
+            speed: 2 + Math.random() * 2, // случайная скорость
+            color: 'green'
+        });
+    }
+}
+
+// Создадим 3 соперника в начале
+createOpponents(3);
+
+// 6) Отслеживаем нажатые клавиши
+let keys = {
+    ArrowLeft: false,
+    ArrowRight: false,
+    ArrowUp: false,
+    ArrowDown: false
+};
+
+document.addEventListener('keydown', (e) => {
+    if (keys.hasOwnProperty(e.key)) {
+        keys[e.key] = true;
+    }
+});
+document.addEventListener('keyup', (e) => {
+    if (keys.hasOwnProperty(e.key)) {
+        keys[e.key] = false;
+    }
+});
+
+// 7) Счётчик очков (за каждую секунду)
+let score = 0;
+let lastUpdateTime = Date.now(); // запомним время старта
+
+// 8) Главная функция обновления логики игры
+function update() {
+    // Движение игрока
+    if (keys.ArrowLeft && player.x > 0) {
+        player.x -= player.speed;
+    }
+    if (keys.ArrowRight && player.x + player.width < canvas.width) {
+        player.x += player.speed;
+    }
+    if (keys.ArrowUp && player.y > 0) {
+        player.y -= player.speed;
+    }
+    if (keys.ArrowDown && player.y + player.height < canvas.height) {
+        player.y += player.speed;
+    }
+
+    // Полицейская машина следует за игроком (очень простая логика)
+    if (police.x < player.x) {
+        police.x += police.speed;
+    }
+    if (police.x > player.x) {
+        police.x -= police.speed;
+    }
+    if (police.y < player.y) {
+        police.y += police.speed;
+    }
+    if (police.y > player.y) {
+        police.y -= police.speed;
+    }
+
+    // Движение соперников (едут сверху вниз)
+    opponents.forEach(op => {
+        op.y += op.speed;
+        // Если соперник выехал за нижнюю границу — вернём его наверх
+        if (op.y > canvas.height) {
+            op.y = -op.height;
+            op.x = Math.random() * (canvas.width - op.width);
+        }
+    });
+
+    // Проверяем столкновение игрока с полицией
+    if (isColliding(player, police)) {
+        alert("Тебя поймали! Игра начнётся заново.");
+        resetGame();
+        return;
+    }
+
+    // Проверяем столкновение игрока с соперниками
+    for (let op of opponents) {
+        if (isColliding(player, op)) {
+            alert("Столкновение с соперником! Игра начнётся заново.");
+            resetGame();
+            return;
+        }
+    }
+
+    // Обновляем счёт, если прошла хотя бы 1 секунда
+    let currentTime = Date.now();
+    if (currentTime - lastUpdateTime >= 1000) {
+        score++;
+        lastUpdateTime = currentTime;
+    }
+}
+
+// 9) Функция для рисования объектов
+function draw() {
+    // Рисуем фон (если картинка не загрузилась, будет серый фон)
+    if (backgroundImg.complete) {
+        ctx.drawImage(backgroundImg, 0, 0, canvas.width, canvas.height);
+    } else {
+        ctx.fillStyle = '#555';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    // Функция для рисования машины
+    function drawCar(car) {
+        // Основное тело машины
+        ctx.fillStyle = car.color;
+        ctx.fillRect(car.x, car.y + 20, car.width, car.height - 25);
+        
+        // Кабина
+        ctx.beginPath();
+        ctx.moveTo(car.x + 10, car.y + 20);
+        ctx.lineTo(car.x + 15, car.y);
+        ctx.lineTo(car.x + car.width - 15, car.y);
+        ctx.lineTo(car.x + car.width - 10, car.y + 20);
+        ctx.fill();
+        
+        // Колёса
+        ctx.fillStyle = 'black';
+        // Левые колёса
+        ctx.fillRect(car.x - 2, car.y + 15, 8, 20);
+        ctx.fillRect(car.x - 2, car.y + car.height - 20, 8, 20);
+        // Правые колёса
+        ctx.fillRect(car.x + car.width - 6, car.y + 15, 8, 20);
+        ctx.fillRect(car.x + car.width - 6, car.y + car.height - 20, 8, 20);
+        
+        // Фары
+        ctx.fillStyle = 'yellow';
+        ctx.fillRect(car.x, car.y + car.height - 5, 10, 5);
+        ctx.fillRect(car.x + car.width - 10, car.y + car.height - 5, 10, 5);
+    }
+
+    // Рисуем все машины
+    drawCar(player);
+    
+    // Для полицейской машины добавим мигалку
+    drawCar(police);
+    ctx.fillStyle = 'red';
+    ctx.fillRect(police.x + 20, police.y - 5, 10, 5);
+    
+    // Рисуем соперников
+    opponents.forEach(op => {
+        drawCar(op);
+    });
+
+    // Выводим счёт
+    ctx.fillStyle = 'white';
+    ctx.font = '20px Arial';
+    ctx.fillText("Счёт: " + score, 10, 20);
+}
+
+// 10) Проверка столкновения (прямоугольники)
+function isColliding(rect1, rect2) {
+    return !(
+        rect1.x > rect2.x + rect2.width ||
+        rect1.x + rect1.width < rect2.x ||
+        rect1.y > rect2.y + rect2.height ||
+        rect1.y + rect1.height < rect2.y
+    );
+}
+
+// 11) Сброс игры (начинаем заново)
+function resetGame() {
+    // Сбрасываем позиции
+    player.x = canvas.width / 2 - 25;
+    player.y = canvas.height - 100;
+
+    police.x = canvas.width / 2 - 25;
+    police.y = 0;
+
+    // Обнуляем счёт
+    score = 0;
+    lastUpdateTime = Date.now();
+
+    // Заново создаём соперников
+    opponents = [];
+    createOpponents(3);
+}
+
+// 12) Главный игровой цикл
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+</script>
+
+</body>
+</html>
